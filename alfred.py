@@ -28,6 +28,7 @@ if __name__ == "__main__":
         "--model-provider",
         type=str,
         default="anthropic",
+        choices=["anthropic"],
         help="Provider of the LLM model. Ensure that credentials are supplied for the provider.",
     )
     parser.add_argument(
@@ -42,6 +43,10 @@ if __name__ == "__main__":
         "--embedding-provider",
         type=str,
         default="sentence_transformers",
+        choices=[
+            "sentence_transformers",
+            "voyageai",
+        ],
         help="Provider of the embedding mode. Ensure that credentials are supplied for the provider.",
     )
     parser.add_argument(
@@ -70,7 +75,7 @@ if __name__ == "__main__":
         raise ValueError(f"Unsupported model provider: {args.model_provider})")
 
     # setup embedding model
-    if args.embedding_provider == "SentenceTransformer":
+    if args.embedding_provider == "sentence_transformers":
 
         class SentenceTransformerEmbeddings(Embeddings):
             def __init__(self, model_name: str):
@@ -84,7 +89,11 @@ if __name__ == "__main__":
             def embed_query(self, text: str) -> list[float]:
                 return self.model.encode([text])[0]
 
-        embedding = SentenceTransformerEmbeddings(args.embedding_model)
+        embedding = SentenceTransformerEmbeddings(args.embedding)
+    elif args.embedding_provider == "voyageai":
+        from langchain_voyageai import VoyageAIEmbeddings
+
+        embedding = VoyageAIEmbeddings(model=args.embedding, batch_size=128)
     else:
         raise ValueError(f"Unsupported embedding provider: {args.embedding_provider})")
 
