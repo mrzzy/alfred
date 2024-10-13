@@ -8,24 +8,20 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import List, cast
 
-from langchain.embeddings.base import Embeddings
-from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_milvus import Milvus
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 if __name__ == "__main__":
     # parse arguments
     parser = ArgumentParser(description="Alfred LLM Tutoring assistant")
     parser.add_argument(
-        "content_dir",
+        "catalog",
         type=Path,
-        help="Path to a directory of course content documents used by Alfred "
-        "to understand the course. Document formats supported: PDF",
+        help="Path to built Knowledge Catalogue Alfred will reference.",
     )
     parser.add_argument(
-        "-M",
-        "--model-provider",
+        "-o",
+        "-provider",
         type=str,
         default="anthropic",
         choices=["anthropic"],
@@ -38,28 +34,10 @@ if __name__ == "__main__":
         default="claude-3-haiku-20240307",
         help="Name of the LLM model to use to generate responses.",
     )
-    parser.add_argument(
-        "-E",
-        "--embedding-provider",
-        type=str,
-        default="sentence_transformers",
-        choices=[
-            "sentence_transformers",
-            "voyageai",
-        ],
-        help="Provider of the embedding mode. Ensure that credentials are supplied for the provider.",
-    )
-    parser.add_argument(
-        "-e",
-        "--embedding",
-        type=str,
-        default="BAAI/bge-en-icl",
-        help="Name of the embedding model to use to embed documents into vectors.",
-    )
     args = parser.parse_args()
 
     # setup LLM model
-    if args.model_provider == "anthropic":
+    if args.provider == "anthropic":
         # expects ANTHROPIC_API_KEY env var to pass api key for authenticating with anthropic api
         from langchain_anthropic import ChatAnthropic
 
@@ -73,44 +51,6 @@ if __name__ == "__main__":
         )
     else:
         raise ValueError(f"Unsupported model provider: {args.model_provider})")
-
-    # setup embedding model
-    if args.embedding_provider == "sentence_transformers":
-
-        class SentenceTransformerEmbeddings(Embeddings):
-            def __init__(self, model_name: str):
-                from sentence_transformers import SentenceTransformer
-
-                self.model = SentenceTransformer(model_name)
-
-            def embed_documents(self, texts: list[str]) -> list[list[float]]:
-                return self.model.encode(texts).tolist()
-
-            def embed_query(self, text: str) -> list[float]:
-                return self.model.encode([text])[0]
-
-        embedding = SentenceTransformerEmbeddings(args.embedding)
-    elif args.embedding_provider == "voyageai":
-        from langchain_voyageai import VoyageAIEmbeddings
-
-        embedding = VoyageAIEmbeddings(model=args.embedding, batch_size=128)
-    else:
-        raise ValueError(f"Unsupported embedding provider: {args.embedding_provider})")
-
-    # load course documents
-    # load PDF documents
-    docs = []
-    for pdf_path in args.content_dir.rglob("*.pdf"):
-        docs.extend(PyMuPDFLoader(pdf_path).load())
-
-    # split course documents into document chunks
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_documents(docs)
-
-    vector_store = Milvus(
-        embedding_function=embedding,
-        connection_args={"uri": "./milvus.db"},
-    )
 
     messages = [
         (
