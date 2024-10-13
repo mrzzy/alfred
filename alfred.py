@@ -4,10 +4,12 @@
 #
 
 
-from pathlib import Path
-from langchain_anthropic import ChatAnthropic
 from argparse import ArgumentParser
+from pathlib import Path
+from typing import cast
 
+from langchain_anthropic import ChatAnthropic
+from langchain_community.document_loaders import PyMuPDFLoader
 
 if __name__ == "__main__":
     # parse arguments
@@ -34,6 +36,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    # load course documents
+    # load PDF documents
+    docs = []
+    for pdf_path in args.content_dir.rglob("*.pdf"):
+        docs.extend(PyMuPDFLoader(pdf_path).load())
+
     # setup LLM model
     # expects ANTHROPIC_API_KEY env var to pass api key for authenticating with anthropic api
     if args.provider == "anthropic":
@@ -55,5 +63,5 @@ if __name__ == "__main__":
         ),
         ("human", "I love programming."),
     ]
-    ai_msg = model.invoke(messages)
-    print(ai_msg.content)
+    # ai_msg = model.invoke(messages)
+    # print(ai_msg.content)
