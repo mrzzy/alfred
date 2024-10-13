@@ -6,10 +6,13 @@
 
 from argparse import ArgumentParser
 from pathlib import Path
-from typing import cast
+from typing import List, cast
 
-from langchain_anthropic import ChatAnthropic
+from langchain.embeddings.base import Embeddings
 from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_milvus import Milvus
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 
 if __name__ == "__main__":
     # parse arguments
@@ -21,8 +24,8 @@ if __name__ == "__main__":
         "to understand the course. Document formats supported: PDF",
     )
     parser.add_argument(
-        "-p",
-        "--provider",
+        "-M",
+        "--model-provider",
         type=str,
         default="anthropic",
         help="Provider of the LLM model. Ensure that credentials are supplied for the provider.",
@@ -34,17 +37,27 @@ if __name__ == "__main__":
         default="claude-3-haiku-20240307",
         help="Name of the LLM model to use to generate responses.",
     )
+    parser.add_argument(
+        "-E",
+        "--embedding-provider",
+        type=str,
+        default="sentence_transformers",
+        help="Provider of the embedding mode. Ensure that credentials are supplied for the provider.",
+    )
+    parser.add_argument(
+        "-e",
+        "--embedding",
+        type=str,
+        default="BAAI/bge-en-icl",
+        help="Name of the embedding model to use to embed documents into vectors.",
+    )
     args = parser.parse_args()
 
-    # load course documents
-    # load PDF documents
-    docs = []
-    for pdf_path in args.content_dir.rglob("*.pdf"):
-        docs.extend(PyMuPDFLoader(pdf_path).load())
-
     # setup LLM model
-    # expects ANTHROPIC_API_KEY env var to pass api key for authenticating with anthropic api
-    if args.provider == "anthropic":
+    if args.model_provider == "anthropic":
+        # expects ANTHROPIC_API_KEY env var to pass api key for authenticating with anthropic api
+        from langchain_anthropic import ChatAnthropic
+
         model = ChatAnthropic(
             model_name=args.model,
             temperature=0,
@@ -54,7 +67,41 @@ if __name__ == "__main__":
             stop=None,
         )
     else:
-        raise ValueError(f"Unsupported model provider: {args.provider})")
+        raise ValueError(f"Unsupported model provider: {args.model_provider})")
+
+    # setup embedding model
+    if args.embedding_provider == "SentenceTransformer":
+
+        class SentenceTransformerEmbeddings(Embeddings):
+            def __init__(self, model_name: str):
+                from sentence_transformers import SentenceTransformer
+
+                self.model = SentenceTransformer(model_name)
+
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                return self.model.encode(texts).tolist()
+
+            def embed_query(self, text: str) -> list[float]:
+                return self.model.encode([text])[0]
+
+        embedding = SentenceTransformerEmbeddings(args.embedding_model)
+    else:
+        raise ValueError(f"Unsupported embedding provider: {args.embedding_provider})")
+
+    # load course documents
+    # load PDF documents
+    docs = []
+    for pdf_path in args.content_dir.rglob("*.pdf"):
+        docs.extend(PyMuPDFLoader(pdf_path).load())
+
+    # split course documents into document chunks
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_documents(docs)
+
+    vector_store = Milvus(
+        embedding_function=embedding,
+        connection_args={"uri": "./milvus.db"},
+    )
 
     messages = [
         (
