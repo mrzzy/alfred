@@ -13,6 +13,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from embedding import Embedding, build_embedding
 
+EMBEDDING_JSON = "embedding.json"
+VECTOR_STORE = "milvus.db"
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Alfred Knowledge Catalogue builder.")
@@ -60,12 +62,12 @@ if __name__ == "__main__":
     args.catalog.mkdir(parents=True, exist_ok=True)
     embedding = Embedding(model=args.model, provider=args.provider)
     # write embedding specification
-    with open(str(args.catalog / "embedding.json"), "w") as f:
+    with open(args.catalog / EMBEDDING_JSON, "w") as f:
         f.write(embedding.model_dump_json())
     # write vector db
     vector_store = Milvus.from_documents(
         docs,
         embedding=build_embedding(embedding),
-        connection_args={"uri": str(args.catalog / "milvus.db")},
+        connection_args={"uri": str(args.catalog / VECTOR_STORE)},
     )
     print("Built Knowledge Catalogue")
