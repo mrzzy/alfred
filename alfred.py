@@ -6,9 +6,10 @@
 
 from argparse import ArgumentParser
 from functools import partial
+from operator import add
 from pathlib import Path
 from pprint import pprint
-from typing import List, Optional, cast
+from typing import Annotated, List, Optional, cast
 
 from huggingface_hub.hf_api import json
 from langchain_core.language_models import BaseChatModel
@@ -31,6 +32,7 @@ from langchain_milvus import Milvus
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.graph import RunnableConfig
+from langgraph.pregel.read import RunnablePassthrough
 from pydantic import BaseModel, Field
 
 from catalog import EMBEDDING_JSON, VECTOR_STORE
@@ -51,7 +53,8 @@ class Document(BaseModel):
 
 class Source(BaseModel):
     reference: Metadata
-    relevance: str = Field(
+    relevance: float = Field(description="0.0 - 1.0 rating of relevance to the answer")
+    rationale: str = Field(
         description="Brief explanation of how this snippet is relevant to the answer"
     )
 
@@ -70,7 +73,7 @@ def extract_json(message: AIMessage) -> AIMessage:
 
 # Graph State schema
 class State(MessagesState):
-    pass
+    outputs: Annotated[list[Output], add]
 
 
 def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
@@ -85,13 +88,15 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
                     "out_schema": json.dumps(Output.model_json_schema()),
                 },
             ),
-            HumanMessagePromptTemplate.from_template("User Prompt:\n {prompt}"),
+            HumanMessagePromptTemplate.from_template(
+                "Answer the User Prompt: {prompt}"
+            ),
         ]
     )
 
     # build langchain
     doc_retriever = vector_store.as_retriever(
-        search_type="similarity", search_kwargs={"k": 4}
+        search_type="similarity", search_kwargs={"k": 20}
     )
     return (
         RunnableAssign(
@@ -118,15 +123,24 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
         )
         | sys_prompt
         | model
-        # clip extract elaboration produced by the model to only JSON returned
-        | RunnableLambda(extract_json)
+        | RunnableParallel(
+            {
+                # unaltered message
+                "messages": RunnableLambda(lambda message: [message]),
+                # parsed output
+                "outputs": (
+                    # clip extract elaboration produced by the model to only JSON returned
+                    RunnableLambda(extract_json)
+                    | PydanticOutputParser(pydantic_object=Output)
+                    | RunnableLambda(lambda output: [output])
+                ),
+            }
+        )
     )
 
 
 def run_chain(state: State, config: RunnableConfig, chain: Runnable) -> dict:
-    ai_message = chain.invoke(state)
-    # state update: append returned message to messages
-    return {"messages": [ai_message]}
+    return chain.invoke(state)
 
 
 if __name__ == "__main__":
@@ -193,8 +207,14 @@ if __name__ == "__main__":
     graph.add_edge(START, "chain")
     graph.add_node("chain", partial(run_chain, chain=chain))
     graph.add_edge("chain", END)
-
     memory = MemorySaver()
     run = graph.compile(checkpointer=memory)
 
-    config = {"configurable": {"thread_id": "0"}}
+    # chatbot loop
+    config = RunnableConfig({"configurable": {"thread_id": "0"}})
+    while True:
+        prompt = input("> ").strip()
+        if len(prompt) <= 0:
+            continue
+        state = run.invoke(input={"messages": [HumanMessage(prompt)]}, config=config)
+        print("< ", state["outputs"][-1].model_dump_json())
