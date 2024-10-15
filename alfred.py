@@ -96,7 +96,7 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
 
     # build langchain
     doc_retriever = vector_store.as_retriever(
-        search_type="similarity", search_kwargs={"k": 20}
+        search_type="similarity", search_kwargs={"k": 10}
     )
     return (
         RunnableAssign(
@@ -106,8 +106,11 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
                     "prompt": RunnableLambda(
                         lambda state: str(state["messages"][-1].content)
                     ),
+                    # extract prior message history, limited to 10 prior messages
                     "prior_messages": RunnableLambda(
-                        lambda state: state["messages"][:-1]
+                        lambda state: "\n".join(
+                            [f"- {m.type}: {m.content}" for m in state["messages"][:-1]][:10]
+                        )
                     ),
                 }
             )
@@ -122,18 +125,18 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
             )
         )
         | sys_prompt
+        | RunnableLambda(lambda x: print(x) or x)
         | model
+        # clip extract elaboration produced by the model to only JSON returned
+        | RunnableLambda(extract_json)
+        | PydanticOutputParser(pydantic_object=Output)
         | RunnableParallel(
             {
                 # unaltered message
-                "messages": RunnableLambda(lambda message: [message]),
+                "messages": RunnableLambda(lambda out: [AIMessage(out.response)]), # type: ignore
                 # parsed output
-                "outputs": (
-                    # clip extract elaboration produced by the model to only JSON returned
-                    RunnableLambda(extract_json)
-                    | PydanticOutputParser(pydantic_object=Output)
-                    | RunnableLambda(lambda output: [output])
-                ),
+                "outputs": RunnableLambda(lambda output: [output])
+                ,
             }
         )
     )
