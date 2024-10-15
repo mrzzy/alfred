@@ -4,6 +4,7 @@
 #
 
 
+import json
 from argparse import ArgumentParser
 from functools import partial
 from operator import add
@@ -11,7 +12,6 @@ from pathlib import Path
 from pprint import pprint
 from typing import Annotated, List, Optional, cast
 
-from huggingface_hub.hf_api import json
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
