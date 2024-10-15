@@ -5,26 +5,39 @@
 
 
 from argparse import ArgumentParser
+from functools import partial
 from pathlib import Path
+from pprint import pprint
 from typing import List, Optional, cast
 
 from huggingface_hub.hf_api import json
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.runnables import RunnableAssign, RunnableLambda, RunnableParallel
-from langchain_milvus import Milvus
 from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
     MessagesPlaceholder,
     SystemMessagePromptTemplate,
 )
+from langchain_core.runnables import (
+    Runnable,
+    RunnableAssign,
+    RunnableLambda,
+    RunnableParallel,
+)
+from langchain_core.vectorstores import VectorStore, VectorStoreRetriever
+from langchain_milvus import Milvus
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph.graph import RunnableConfig
 from pydantic import BaseModel, Field
 
 from catalog import EMBEDDING_JSON, VECTOR_STORE
 from embedding import Embedding, build_embedding
 
 
+# Model Input / Response Schemas
 class Metadata(BaseModel):
     doc_id: str = Field(description="Snippet ID of the document")
     source: str = Field(description="Source of the document")
@@ -53,6 +66,67 @@ def extract_json(message: AIMessage) -> AIMessage:
     # assume bonds of json are delimited by brackets
     message.content = content[content.find("{") : content.rfind("}") + 1]
     return message
+
+
+# Graph State schema
+class State(MessagesState):
+    pass
+
+
+def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
+    # build prompt template
+    sys_prompt = ChatPromptTemplate.from_messages(
+        [
+            SystemMessagePromptTemplate.from_template_file(
+                args.system_prompt,
+                input_variables=["messages", "documents"],
+                partial_variables={
+                    "doc_schema": json.dumps(Document.model_json_schema()),
+                    "out_schema": json.dumps(Output.model_json_schema()),
+                },
+            ),
+            HumanMessagePromptTemplate.from_template("User Prompt:\n {prompt}"),
+        ]
+    )
+
+    # build langchain
+    doc_retriever = vector_store.as_retriever(
+        search_type="similarity", search_kwargs={"k": 4}
+    )
+    return (
+        RunnableAssign(
+            RunnableParallel(
+                {
+                    # extract prompt from last message, assumed to be from the human user
+                    "prompt": RunnableLambda(
+                        lambda state: str(state["messages"][-1].content)
+                    ),
+                    "prior_messages": RunnableLambda(
+                        lambda state: state["messages"][:-1]
+                    ),
+                }
+            )
+        )
+        | RunnableAssign(
+            RunnableParallel(
+                {
+                    "documents": RunnableLambda(
+                        lambda state: doc_retriever.invoke(state["prompt"])
+                    ),
+                }
+            )
+        )
+        | sys_prompt
+        | model
+        # clip extract elaboration produced by the model to only JSON returned
+        | RunnableLambda(extract_json)
+    )
+
+
+def run_chain(state: State, config: RunnableConfig, chain: Runnable) -> dict:
+    ai_message = chain.invoke(state)
+    # state update: append returned message to messages
+    return {"messages": [ai_message]}
 
 
 if __name__ == "__main__":
@@ -104,48 +178,23 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unsupported model provider: {args.model_provider})")
 
-    # build knowledge catalogue vector store retriever
+    # load knowledge catalogue vector store
     with open(args.catalog / EMBEDDING_JSON, "r") as f:
         embedding = build_embedding(Embedding(**json.load(f)))
     vector_store = Milvus(
         embedding_function=embedding,
         connection_args={"uri": str(args.catalog / VECTOR_STORE)},
     )
-    doc_retriever = vector_store.as_retriever(
-        search_type="similarity", search_kwargs={"k": 4}
-    )
 
-    # build prompt template
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            SystemMessagePromptTemplate.from_template_file(
-                args.system_prompt,
-                input_variables=[],
-                partial_variables={
-                    "doc_schema": json.dumps(Document.model_json_schema()),
-                    "out_schema": json.dumps(Output.model_json_schema()),
-                },
-            ),
-            HumanMessagePromptTemplate.from_template("User Prompt:\n {prompt}"),
-        ]
-    )
+    chain = build_chain(vector_store, model)
 
-    # build langchain
-    chain = (
-        RunnableAssign(
-            RunnableParallel(
-                {
-                    "documents": RunnableLambda(
-                        lambda d: doc_retriever.invoke(d["prompt"])
-                    ),
-                    "messages": RunnableLambda(lambda d: []),
-                }
-            )
-        )
-        | prompt
-        | model
-        | RunnableLambda(extract_json)
-        | PydanticOutputParser(pydantic_object=Output)
-    )
-    ai_msg = chain.invoke({"prompt": "What is CC7?"})
-    print(ai_msg)
+    # build & compile execution graph
+    graph = StateGraph(state_schema=State)
+    graph.add_edge(START, "chain")
+    graph.add_node("chain", partial(run_chain, chain=chain))
+    graph.add_edge("chain", END)
+
+    memory = MemorySaver()
+    run = graph.compile(checkpointer=memory)
+
+    config = {"configurable": {"thread_id": "0"}}

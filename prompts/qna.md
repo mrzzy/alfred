@@ -89,4 +89,4 @@ Document Snippets:
 {documents}
 
 Prior Messages:
-{messages}
+{prior_messages}
