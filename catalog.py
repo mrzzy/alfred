@@ -7,7 +7,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 from langchain.embeddings.base import Embeddings
-from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_community.document_loaders import (
+    PyMuPDFLoader,
+    SRTLoader,
+    TextLoader,
+    UnstructuredPowerPointLoader,
+)
 from langchain_milvus import Milvus
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -49,11 +54,20 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     # load course documents
-    # load PDF documents
     docs = []
-    for pdf_path in args.content_dir.rglob("*.pdf"):
-        docs.extend(PyMuPDFLoader(pdf_path).load())
-
+    loaders = {
+        # load SRT transcripts
+        "*.srt": SRTLoader,
+        # load text files
+        "*.txt": TextLoader,
+        # load pdf files
+        "*.pdf": PyMuPDFLoader,
+        # load powerpoint files
+        "*.pptx": UnstructuredPowerPointLoader,
+    }
+    for glob, Loader in loaders.items():
+        for path in args.content_dir.rglob(glob):
+            docs.extend(Loader(path).load())
     # split course documents into document chunks
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(docs)
