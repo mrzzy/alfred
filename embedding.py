@@ -34,6 +34,6 @@ def build_embedding(spec: Embedding) -> Embeddings:
     elif spec.provider == "voyageai":
         from langchain_voyageai import VoyageAIEmbeddings
 
-        return VoyageAIEmbeddings(model=spec.model, batch_size=128)
+        return VoyageAIEmbeddings(model=spec.model, batch_size=128, truncation=True)
     else:
         raise ValueError(f"Unsupported embedding provider: {spec.provider})")
