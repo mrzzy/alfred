@@ -96,7 +96,7 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
 
     # build langchain
     doc_retriever = vector_store.as_retriever(
-        search_type="similarity", search_kwargs={"k": 10}
+        search_type="similarity", search_kwargs={"k": 15}
     )
     return (
         RunnableAssign(
