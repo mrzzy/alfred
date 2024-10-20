@@ -38,7 +38,7 @@ if __name__ == "__main__":
         "-p",
         "--provider",
         type=str,
-        default="sentence_transformers",
+        default="voyageai",
         choices=[
             "sentence_transformers",
             "voyageai",
@@ -49,7 +49,7 @@ if __name__ == "__main__":
         "-m",
         "--model",
         type=str,
-        default="BAAI/bge-en-icl",
+        default="voyage-3",
         help="Name of the embedding model to use to embed documents into vectors.",
     )
     args = parser.parse_args()

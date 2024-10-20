@@ -167,7 +167,7 @@ if __name__ == "__main__":
         "-m",
         "--model",
         type=str,
-        default="claude-3-haiku-20240307",
+        default="claude-3-5-sonnet-20240620",
         help="Name of the LLM model to use to generate responses.",
     )
     parser.add_argument(
