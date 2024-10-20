@@ -109,7 +109,10 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
                     # extract prior message history, limited to 10 prior messages
                     "prior_messages": RunnableLambda(
                         lambda state: "\n".join(
-                            [f"- {m.type}: {m.content}" for m in state["messages"][:-1]][:10]
+                            [
+                                f"- {m.type}: {m.content}"
+                                for m in state["messages"][:-1]
+                            ][:10]
                         )
                     ),
                 }
@@ -125,7 +128,6 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
             )
         )
         | sys_prompt
-        | RunnableLambda(lambda x: print(x) or x)
         | model
         # clip extract elaboration produced by the model to only JSON returned
         | RunnableLambda(extract_json)
@@ -133,10 +135,9 @@ def build_chain(vector_store: VectorStore, model: BaseChatModel) -> Runnable:
         | RunnableParallel(
             {
                 # unaltered message
-                "messages": RunnableLambda(lambda out: [AIMessage(out.response)]), # type: ignore
+                "messages": RunnableLambda(lambda out: [AIMessage(out.response)]),  # type: ignore
                 # parsed output
-                "outputs": RunnableLambda(lambda output: [output])
-                ,
+                "outputs": RunnableLambda(lambda output: [output]),
             }
         )
     )
@@ -215,9 +216,23 @@ if __name__ == "__main__":
 
     # chatbot loop
     config = RunnableConfig({"configurable": {"thread_id": "0"}})
+    prompt = ""
     while True:
-        prompt = input("> ").strip()
         if len(prompt) <= 0:
+            prompt = input("> ").strip()
+        if len(prompt) <= 0:
+            # empty prompt skip
             continue
-        state = run.invoke(input={"messages": [HumanMessage(prompt)]}, config=config)
-        print("< ", state["outputs"][-1].model_dump_json())
+        try:
+            state = run.invoke(
+                input={"messages": [HumanMessage(prompt)]}, config=config
+            )
+            prompt = ""
+        except Exception as e:
+            # reprompt model to correct its response based on exception feedback
+            prompt = f"Correct your response which gave the error:\n {e}"
+            continue
+        output = state["outputs"][-1]
+        print("<\n", output.response)
+        print("Sources:")
+        pprint([source.dict() for source in output.sources])
