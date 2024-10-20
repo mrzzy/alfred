@@ -56,14 +56,14 @@ if __name__ == "__main__":
     # load course documents
     docs = []
     loaders = {
+        # load powerpoint files
+        "*.pptx": UnstructuredPowerPointLoader,
         # load SRT transcripts
         "*.srt": SRTLoader,
         # load text files
         "*.txt": TextLoader,
         # load pdf files
         "*.pdf": PyMuPDFLoader,
-        # load powerpoint files
-        "*.pptx": UnstructuredPowerPointLoader,
     }
     for glob, Loader in loaders.items():
         for path in args.content_dir.rglob(glob):
