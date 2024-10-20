@@ -67,7 +67,7 @@ if __name__ == "__main__":
     }
     for glob, Loader in loaders.items():
         for path in args.content_dir.rglob(glob):
-            docs.extend(Loader(path).load())
+            docs.extend(Loader(str(path)).load())
     # split course documents into document chunks
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(docs)
